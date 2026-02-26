@@ -1,0 +1,1054 @@
+{
+  "$schema": "https://webapp-registry.internal/schema/v1.0.0/app-spec.json",
+  "specVersion": "1.0.0",
+  "generatedAt": "2026-02-26T00:00:002",
+  "generator": "ai-codebase-analyzer",
+
+  "app": {
+    "id": "task-dashboard",
+    "name": "Task Dashboard",
+    "version": "1.0.0",
+    "description": "A full-stack GTD-inspired task management dashboard with project organization, Kanban boards, priority matrix, Pomodoro timer, subtasks, tagging, and activity tracking.",
+    "repository": "/home/PB35960/work/TaskDashboard",
+    "license": null,
+    "authors": [],
+    "tags": ["task-management", "gtd", "kanban", "pomodoro", "productivity"]
+  },
+
+  "architecture": {
+    "pattern": "client-server-monorepo",
+    "description": "Monorepo with separate client/ and server/ directories. Express API server with SQLite database serves a React SPA. Client proxies API calls to server during development.",
+    "deployment": {
+      "strategy": "local-process",
+      "startCommand": "./start-dashboard.sh",
+      "stopCommand": "./stop-dashboard.sh"
+    },
+    "directories": {
+      "root": ".",
+      "server": "server/",
+      "client": "client/",
+      "database": "tasks.db",
+      "build": "client/build/"
+    }
+  },
+
+  "technology": {
+    "runtime": {
+      "name": "Node.js",
+      "requiredVersion": ">=16"
+    },
+    "server": {
+      "framework": "Express",
+      "version": "^4.18.2",
+      "language": "JavaScript (CommonJS)",
+      "entryPoint": "server/index.js",
+      "port": 3001,
+      "middleware": [
+        { "name": "cors", "package": "cors@^2.8.5", "purpose": "Cross-origin requests from React dev server" },
+        { "name": "express.json", "package": "express (built-in)", "purpose": "JSON body parsing" }
+      ],
+      "dependencies": {
+        "express": "^4.18.2",
+        "cors": "^2.8.5",
+        "better-sqlite3": "^11.0.0",
+        "js-yaml": "^4.1.0"
+      }
+    },
+    "client": {
+      "framework": "React",
+      "version": "^18.2.0",
+      "language": "JavaScript (JSX)",
+      "bundler": "react-scripts (Create React App) 5.0.1",
+      "entryPoint": "client/src/index.jsx",
+      "port": 3000,
+      "proxy": "http://localhost:3001",
+      "dependencies": {
+        "react": "^18.2.0",
+        "react-dom": "^18.2.0",
+        "react-markdown": "^9.0.1",
+        "react-scripts": "5.0.1"
+      },
+      "stateManagement": "React useState/useCallback hooks (no external state library)",
+      "routing": "none (single-page with view switching via state)"
+    },
+    "database": {
+      "engine": "SQLite",
+      "driver": "better-sqlite3@^11.0.0",
+      "filePath": "tasks.db",
+      "pragmas": ["foreign_keys = ON"],
+      "features": ["synchronous API", "transactions", "auto-migration on startup"]
+    }
+  },
+
+  "database": {
+    "engine": "SQLite",
+    "tables": [
+      {
+        "name": "projects",
+        "description": "Project containers that group tasks",
+        "columns": [
+          { "name": "code", "type": "TEXT", "primaryKey": true, "description": "Unique project code identifier (e.g. 'INBOX', 'I_IMMERSIVE')" },
+          { "name": "name", "type": "TEXT", "nullable": false, "description": "Human-readable project name" },
+          { "name": "description", "type": "TEXT", "nullable": true },
+          { "name": "status", "type": "TEXT", "nullable": true, "enumValues": ["In Progress", "Completed", "Archived"], "description": "Project lifecycle status" }
+        ],
+        "indexes": []
+      },
+      {
+        "name": "tasks",
+        "description": "Individual task items belonging to projects",
+        "columns": [
+          { "name": "id", "type": "INTEGER", "primaryKey": true, "autoIncrement": true },
+          { "name": "project_code", "type": "TEXT", "nullable": false, "foreignKey": { "table": "projects", "column": "code", "onDelete": "CASCADE" } },
+          { "name": "task_number", "type": "INTEGER", "nullable": false, "description": "Sequential number within a project" },
+          { "name": "title", "type": "TEXT", "nullable": false },
+          { "name": "due_date", "type": "TEXT", "nullable": true, "format": "YYYY-MM-DD or ISO 8601" },
+          { "name": "created_on", "type": "TEXT", "nullable": true, "format": "YYYY-MM-DD" },
+          { "name": "assigned_to", "type": "TEXT", "nullable": true },
+          { "name": "status", "type": "TEXT", "default": "PENDING", "enumValues": ["PENDING", "INPROGRESS", "COMPLETED", "DONE", "CANCELLED", "NOT DOING"] },
+          { "name": "comments", "type": "TEXT", "nullable": true, "description": "Markdown-formatted comments" },
+          { "name": "priority", "type": "TEXT", "nullable": true, "enumValues": ["HIGH", "MEDIUM", "LOW"] },
+          { "name": "quadrant", "type": "TEXT", "nullable": true, "enumValues": ["DO FIRST", "SCHEDULE", "DELEGATE", "ELIMINATE"], "description": "Eisenhower matrix quadrant" },
+          { "name": "progress", "type": "INTEGER", "default": 0, "description": "Completion percentage 0-100" },
+          { "name": "deleted_at", "type": "TEXT", "nullable": true, "description": "Soft-delete timestamp (ISO 8601)" },
+          { "name": "pinned", "type": "INTEGER", "default": 0, "description": "Boolean flag (0/1) for pinned tasks" },
+          { "name": "sort_order", "type": "INTEGER", "default": 0, "description": "Custom ordering for drag-and-drop" }
+        ],
+        "uniqueConstraints": [
+          { "columns": ["project_code", "task_number"] }
+        ],
+        "indexes": [
+          { "name": "idx_tasks_project", "columns": ["project_code"] },
+          { "name": "idx_tasks_status", "columns": ["status"] },
+          { "name": "idx_tasks_priority", "columns": ["priority"] },
+          { "name": "idx_tasks_due_date", "columns": ["due_date"] }
+        ]
+      },
+      {
+        "name": "tags",
+        "description": "Labels and GTD context tags (prefixed with @)",
+        "columns": [
+          { "name": "id", "type": "INTEGER", "primaryKey": true, "autoIncrement": true },
+          { "name": "name", "type": "TEXT", "nullable": false, "unique": true, "description": "Tag name, context tags start with @ (e.g. '@computer')" },
+          { "name": "color", "type": "TEXT", "nullable": false, "default": "#38bdf8", "description": "Hex color code" },
+          { "name": "is_context", "type": "INTEGER", "nullable": false, "default": 0, "description": "Boolean (0/1): GTD context tag vs regular tag" },
+          { "name": "sort_order", "type": "INTEGER", "default": 0 }
+        ],
+        "seedData": {
+          "contextTags": [
+            { "name": "@computer", "color": "#3b82f6" },
+            { "name": "@calls", "color": "#22c55e" },
+            { "name": "@email", "color": "#8b5cf6" },
+            { "name": "@errands", "color": "#f97316" },
+            { "name": "@home", "color": "#ec4899" },
+            { "name": "@office", "color": "#06b6d4" },
+            { "name": "@waiting", "color": "#eab308" },
+            { "name": "@read", "color": "#64748b" },
+            { "name": "@focus", "color": "#ef4444" },
+            { "name": "@quick", "color": "#14b8a6" }
+          ]
+        },
+        "indexes": []
+      },
+      {
+        "name": "task_tags",
+        "description": "Many-to-many junction table between tasks and tags",
+        "columns": [
+          { "name": "task_id", "type": "INTEGER", "nullable": false, "foreignKey": { "table": "tasks", "column": "id", "onDelete": "CASCADE" } },
+          { "name": "tag_id", "type": "INTEGER", "nullable": false, "foreignKey": { "table": "tags", "column": "id", "onDelete": "CASCADE" } }
+        ],
+        "primaryKey": ["task_id", "tag_id"],
+        "indexes": [
+          { "name": "idx_task_tags_task", "columns": ["task_id"] },
+          { "name": "idx_task_tags_tag", "columns": ["tag_id"] }
+        ]
+      },
+      {
+        "name": "subtasks",
+        "description": "Nested checklist items within a task",
+        "columns": [
+          { "name": "id", "type": "INTEGER", "primaryKey": true, "autoIncrement": true },
+          { "name": "task_id", "type": "INTEGER", "nullable": false, "foreignKey": { "table": "tasks", "column": "id", "onDelete": "CASCADE" } },
+          { "name": "title", "type": "TEXT", "nullable": false },
+          { "name": "is_completed", "type": "INTEGER", "nullable": false, "default": 0, "description": "Boolean (0/1)" },
+          { "name": "sort_order", "type": "INTEGER", "nullable": false, "default": 0 },
+          { "name": "created_at", "type": "TEXT", "default": "datetime('now')" },
+          { "name": "updated_at", "type": "TEXT", "default": "datetime('now')" }
+        ],
+        "indexes": [
+          { "name": "idx_subtasks_task", "columns": ["task_id"] },
+          { "name": "idx_subtasks_sort", "columns": ["task_id", "sort_order"] }
+        ]
+      },
+      {
+        "name": "task_notes",
+        "description": "Rich markdown notes / journal entries per task",
+        "columns": [
+          { "name": "id", "type": "INTEGER", "primaryKey": true, "autoIncrement": true },
+          { "name": "task_id", "type": "INTEGER", "nullable": false, "foreignKey": { "table": "tasks", "column": "id", "onDelete": "CASCADE" } },
+          { "name": "content", "type": "TEXT", "nullable": false, "description": "Markdown-formatted note content" },
+          { "name": "created_at", "type": "TEXT", "default": "datetime('now')" },
+          { "name": "updated_at", "type": "TEXT", "default": "datetime('now')" }
+        ],
+        "indexes": [
+          { "name": "idx_task_notes_task", "columns": ["task_id"] },
+          { "name": "idx_task_notes_created", "columns": ["created_at DESC"] }
+        ]
+      },
+      {
+        "name": "task_templates",
+        "description": "Reusable task blueprints (built-in and user-created)",
+        "columns": [
+          { "name": "id", "type": "INTEGER", "primaryKey": true, "autoIncrement": true },
+          { "name": "name", "type": "TEXT", "nullable": false },
+          { "name": "description", "type": "TEXT", "nullable": true },
+          { "name": "icon", "type": "TEXT", "default": "\ud83d\udccb", "description": "Emoji icon for UI display" },
+          { "name": "title", "type": "TEXT", "nullable": false, "description": "Pre-filled task title prefix" },
+          { "name": "priority", "type": "TEXT", "nullable": true, "enumValues": ["HIGH", "MEDIUM", "LOW"] },
+          { "name": "quadrant", "type": "TEXT", "nullable": true, "enumValues": ["DO FIRST", "SCHEDULE", "DELEGATE", "ELIMINATE"] },
+          { "name": "estimated_duration", "type": "TEXT", "nullable": true, "description": "E.g. '30min', '1hr', '2hr'" },
+          { "name": "default_tags", "type": "TEXT", "nullable": true, "description": "JSON array of tag IDs" },
+          { "name": "comments", "type": "TEXT", "nullable": true, "description": "Pre-filled markdown comments/checklist" },
+          { "name": "is_builtin", "type": "INTEGER", "nullable": false, "default": 0, "description": "Boolean (0/1): built-in templates cannot be deleted" },
+          { "name": "sort_order", "type": "INTEGER", "default": 0 },
+          { "name": "created_at", "type": "TEXT", "default": "datetime('now')" },
+          { "name": "updated_at", "type": "TEXT", "default": "datetime('now')" }
+        ],
+        "seedData": {
+          "builtInTemplates": ["Quick Task", "Code Review", "Bug Investigation", "Meeting Follow-up", "Research Task", "Documentation", "Deployment Task", "Waiting For"]
+        },
+        "indexes": [
+          { "name": "idx_task_templates_sort", "columns": ["sort_order ASC", "name ASC"] }
+        ]
+      },
+      {
+        "name": "activity_log",
+        "description": "Audit trail of all changes to projects, tasks, and tags",
+        "columns": [
+          { "name": "id", "type": "INTEGER", "primaryKey": true, "autoIncrement": true },
+          { "name": "timestamp", "type": "TEXT", "nullable": false, "default": "datetime('now')" },
+          { "name": "entity_type", "type": "TEXT", "nullable": false, "enumValues": ["project", "task", "tag"] },
+          { "name": "entity_id", "type": "TEXT", "nullable": true },
+          { "name": "entity_name", "type": "TEXT", "nullable": true },
+          { "name": "action_type", "type": "TEXT", "nullable": false, "enumValues": ["create", "update", "delete", "archive", "restore", "move", "reorder", "pin", "unpin", "status_change", "pomodoro_start", "pomodoro_complete", "note_add", "note_update", "note_delete", "subtask_add", "subtask_bulk_add", "subtask_complete", "subtask_uncomplete", "subtask_update", "subtask_delete"] },
+          { "name": "user", "type": "TEXT", "default": "System" },
+          { "name": "changes", "type": "TEXT", "nullable": true, "description": "JSON object: { field: { old: value, new: value } }" },
+          { "name": "description", "type": "TEXT", "nullable": false, "description": "Human-readable change description" }
+        ],
+        "indexes": [
+          { "name": "idx_activity_timestamp", "columns": ["timestamp DESC"] },
+          { "name": "idx_activity_entity", "columns": ["entity_type", "entity_id"] },
+          { "name": "idx_activity_action", "columns": ["action_type"] }
+        ]
+      },
+      {
+        "name": "pomodoro_sessions",
+        "description": "Pomodoro timer work/break sessions",
+        "columns": [
+          { "name": "id", "type": "INTEGER", "primaryKey": true, "autoIncrement": true },
+          { "name": "task_id", "type": "INTEGER", "nullable": true, "foreignKey": { "table": "tasks", "column": "id", "onDelete": "SET NULL" } },
+          { "name": "duration_minutes", "type": "INTEGER", "nullable": false, "default": 25 },
+          { "name": "started_at", "type": "TEXT", "nullable": false, "format": "ISO 8601" },
+          { "name": "completed_at", "type": "TEXT", "nullable": true, "format": "ISO 8601" },
+          { "name": "status", "type": "TEXT", "nullable": false, "default": "active", "enumValues": ["active", "completed", "cancelled"] },
+          { "name": "notes", "type": "TEXT", "nullable": true }
+        ],
+        "indexes": [
+          { "name": "idx_pomodoro_task", "columns": ["task_id"] },
+          { "name": "idx_pomodoro_status", "columns": ["status"] },
+          { "name": "idx_pomodoro_started", "columns": ["started_at DESC"] }
+        ]
+      }
+    ],
+    "relationships": [
+      { "from": "tasks.project_code", "to": "projects.code", "type": "many-to-one", "onDelete": "CASCADE" },
+      { "from": "task_tags.task_id", "to": "tasks.id", "type": "many-to-one", "onDelete": "CASCADE" },
+      { "from": "task_tags.tag_id", "to": "tags.id", "type": "many-to-one", "onDelete": "CASCADE" },
+      { "from": "subtasks.task_id", "to": "tasks.id", "type": "many-to-one", "onDelete": "CASCADE" },
+      { "from": "task_notes.task_id", "to": "tasks.id", "type": "many-to-one", "onDelete": "CASCADE" },
+      { "from": "pomodoro_sessions.task_id", "to": "tasks.id", "type": "many-to-one", "onDelete": "SET NULL" }
+    ]
+  },
+
+  "api": {
+    "baseUrl": "http://localhost:3001",
+    "basePath": "/api",
+    "format": "JSON",
+    "authentication": null,
+    "endpoints": [
+      {
+        "method": "GET",
+        "path": "/api/health",
+        "summary": "Health check",
+        "responses": { "200": { "schema": { "status": "string", "database": "string", "timestamp": "string" } } }
+      },
+      {
+        "method": "GET",
+        "path": "/api/tasks",
+        "summary": "Get all projects with their tasks, tags, note counts, and subtask stats",
+        "responses": {
+          "200": {
+            "schema": {
+              "projects": [{ "code": "string", "name": "string", "description": "string?", "status": "string?", "tasks": [{
+                "id": "number", "title": "string", "taskNumber": "string", "dueDate": "string?", "createdOn": "string?",
+                "assignedTo": "string?", "status": "string", "comments": "string?", "priority": "string?", "quadrant": "string?",
+                "progress": "number", "pinned": "boolean", "sortOrder": "number", "tags": "Tag[]", "noteCount": "number",
+                "subtaskStats": { "total": "number", "completed": "number" } }] }],
+              "tags": "Tag[]",
+              "lastUpdated": "string"
+            }
+          }
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/api/stats",
+        "summary": "Get aggregate task statistics",
+        "responses": { "200": { "schema": { "totalTasks": "number", "totalProjects": "number", "byStatus": "object", "byPriority": "object" } } }
+      },
+      {
+        "method": "POST",
+        "path": "/api/summary",
+        "summary": "Generate a markdown summary of all tasks, priorities, overdue items, subtask progress",
+        "responses": { "200": { "schema": { "summary": "string (markdown)", "generatedAt": "string" } } }
+      },
+      {
+        "method": "POST",
+        "path": "/api/projects",
+        "summary": "Create a new project",
+        "requestBody": { "code": "string (required)", "name": "string (required)", "description": "string?", "status": "string?", "user": "string?" },
+        "responses": { "201": {}, "400": { "error": "missing fields" }, "409": { "error": "duplicate code" } }
+      },
+      {
+        "method": "PUT",
+        "path": "/api/projects/:code",
+        "summary": "Update a project",
+        "parameters": [{ "name": "code", "in": "path", "type": "string" }],
+        "requestBody": { "name": "string?", "description": "string?", "status": "string?", "user": "string?" },
+        "responses": { "200": {}, "404": {} }
+      },
+      {
+        "method": "PUT",
+        "path": "/api/projects/:code/archive",
+        "summary": "Archive a project (soft delete)",
+        "parameters": [{ "name": "code", "in": "path", "type": "string" }],
+        "responses": { "200": { "schema": { "canUndo": true } }, "404": {} }
+      },
+      {
+        "method": "PUT",
+        "path": "/api/projects/:code/restore",
+        "summary": "Restore an archived project",
+        "parameters": [{ "name": "code", "in": "path", "type": "string" }],
+        "requestBody": { "status": "string?", "user": "string?" },
+        "responses": { "200": {}, "404": {} }
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/projects/:code",
+        "summary": "Permanently delete a project and all its tasks (CASCADE)",
+        "parameters": [{ "name": "code", "in": "path", "type": "string" }, { "name": "user", "in": "query", "type": "string?" }],
+        "responses": { "200": {}, "404": {} }
+      },
+      {
+        "method": "POST",
+        "path": "/api/projects/:projectCode/tasks",
+        "summary": "Create a new task in a project",
+        "parameters": [{ "name": "projectCode", "in": "path", "type": "string" }],
+        "requestBody": { "title": "string (required)", "dueDate": "string?", "assignedTo": "string?", "status": "string?", "comments": "string?", "priority": "string?", "quadrant": "string?", "progress": "number?", "user": "string?" },
+        "responses": { "201": { "schema": { "taskId": "number", "taskNumber": "number" } }, "400": {}, "404": {} },
+        "businessLogic": "Auto-assigns next task_number. Auto-sets progress=100 when status is COMPLETED/DONE."
+      },
+      {
+        "method": "PUT",
+        "path": "/api/projects/:projectCode/tasks/reorder",
+        "summary": "Reorder tasks within a project (drag-and-drop)",
+        "requestBody": { "taskOrders": [{ "id": "number", "sort_order": "number" }], "user": "string?" },
+        "responses": { "200": {}, "400": {}, "404": {} }
+      },
+      {
+        "method": "PUT",
+        "path": "/api/tasks/reorder",
+        "summary": "Reorder tasks across all projects (All Tasks view)",
+        "requestBody": { "taskOrders": [{ "id": "number", "sort_order": "number" }], "user": "string?" },
+        "responses": { "200": {}, "400": {} }
+      },
+      {
+        "method": "PUT",
+        "path": "/api/tasks/bulk-move",
+        "summary": "Bulk move multiple tasks to a different project",
+        "requestBody": { "taskIds": "number[]", "projectCode": "string", "user": "string?" },
+        "responses": { "200": { "schema": { "movedCount": "number", "skippedCount": "number", "errorCount": "number" } } }
+      },
+      {
+        "method": "PUT",
+        "path": "/api/tasks/:id",
+        "summary": "Update a task",
+        "parameters": [{ "name": "id", "in": "path", "type": "number" }],
+        "requestBody": { "title": "string?", "dueDate": "string?", "assignedTo": "string?", "status": "string?", "comments": "string?", "priority": "string?", "quadrant": "string?", "progress": "number?", "pinned": "boolean?", "user": "string?" },
+        "responses": { "200": {}, "404": {} },
+        "businessLogic": "Auto-sets progress=100 when status is COMPLETED/DONE. Logs detailed field-level change audit."
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/tasks/:id",
+        "summary": "Delete a task (soft delete by default, permanent if ?permanent=true)",
+        "parameters": [{ "name": "id", "in": "path", "type": "number" }, { "name": "permanent", "in": "query", "type": "boolean?" }, { "name": "user", "in": "query", "type": "string?" }],
+        "responses": { "200": { "schema": { "canUndo": "boolean" } }, "404": {} }
+      },
+      {
+        "method": "POST",
+        "path": "/api/tasks/:id/restore",
+        "summary": "Restore a soft-deleted task",
+        "responses": { "200": {}, "400": { "error": "not deleted" }, "404": {} }
+      },
+      {
+        "method": "PUT",
+        "path": "/api/tasks/:id/pin",
+        "summary": "Toggle pin status on a task",
+        "responses": { "200": { "schema": { "pinned": "boolean" } }, "404": {} }
+      },
+      {
+        "method": "PUT",
+        "path": "/api/tasks/:id/move",
+        "summary": "Move a single task to a different project",
+        "requestBody": { "projectCode": "string", "user": "string?" },
+        "responses": { "200": { "schema": { "newTaskNumber": "number" } }, "400": {}, "404": {} }
+      },
+      {
+        "method": "PUT",
+        "path": "/api/tasks/:id/tags",
+        "summary": "Replace all tags on a task",
+        "requestBody": { "tagIds": "number[]" },
+        "responses": { "200": { "schema": { "tags": "Tag[]" } }, "400": {}, "404": {} }
+      },
+      {
+        "method": "GET",
+        "path": "/api/tasks/deleted",
+        "summary": "Get soft-deleted tasks (trash)",
+        "parameters": [{ "name": "limit", "in": "query", "type": "number?", "default": 50 }],
+        "responses": { "200": { "schema": { "tasks": "DeletedTask[]", "count": "number" } } }
+      },
+      {
+        "method": "GET",
+        "path": "/api/tasks/:id/activity",
+        "summary": "Get activity log for a specific task",
+        "parameters": [{ "name": "limit", "in": "query", "type": "number?", "default": 20 }],
+        "responses": { "200": { "schema": { "activities": "Activity[]" } } }
+      },
+      {
+        "method": "GET",
+        "path": "/api/tasks/:id/notes",
+        "summary": "Get all notes for a task",
+        "responses": { "200": { "schema": { "taskId": "number", "notes": "Note[]", "count": "number" } } }
+      },
+      {
+        "method": "POST",
+        "path": "/api/tasks/:id/notes",
+        "summary": "Create a note for a task",
+        "requestBody": { "content": "string (required, markdown)", "user": "string?" },
+        "responses": { "201": { "schema": { "note": "Note" } }, "400": {}, "404": {} }
+      },
+      {
+        "method": "PUT",
+        "path": "/api/tasks/:taskId/notes/:noteId",
+        "summary": "Update a task note",
+        "requestBody": { "content": "string (required)", "user": "string?" },
+        "responses": { "200": {}, "400": {}, "404": {} }
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/tasks/:taskId/notes/:noteId",
+        "summary": "Delete a task note",
+        "responses": { "200": {}, "400": {}, "404": {} }
+      },
+      {
+        "method": "GET",
+        "path": "/api/tasks/:id/subtasks",
+        "summary": "Get all subtasks for a task with completion stats",
+        "responses": { "200": { "schema": { "taskId": "number", "subtasks": "Subtask[]", "stats": { "total": "number", "completed": "number" } } } }
+      },
+      {
+        "method": "POST",
+        "path": "/api/tasks/:id/subtasks",
+        "summary": "Create a subtask",
+        "requestBody": { "title": "string (required)", "user": "string?" },
+        "responses": { "201": { "schema": { "subtask": "Subtask" } }, "400": {}, "404": {} }
+      },
+      {
+        "method": "POST",
+        "path": "/api/tasks/:id/subtasks/bulk",
+        "summary": "Bulk create subtasks",
+        "requestBody": { "subtasks": "string[] | { title: string, is_completed?: boolean }[]", "user": "string?" },
+        "responses": { "201": { "schema": { "subtasks": "Subtask[]" } } }
+      },
+      {
+        "method": "PUT",
+        "path": "/api/tasks/:taskId/subtasks/:subtaskId",
+        "summary": "Update a subtask (title or completion)",
+        "requestBody": { "title": "string?", "isCompleted": "boolean?", "user": "string?" },
+        "responses": { "200": {}, "400": {}, "404": {} }
+      },
+      {
+        "method": "POST",
+        "path": "/api/tasks/:taskId/subtasks/:subtaskId/toggle",
+        "summary": "Toggle subtask completion and return updated stats",
+        "responses": { "200": { "schema": { "isCompleted": "boolean", "stats": { "total": "number", "completed": "number" } } } }
+      },
+      {
+        "method": "PUT",
+        "path": "/api/tasks/:id/subtasks/reorder",
+        "summary": "Reorder subtasks within a task",
+        "requestBody": { "subtaskOrders": [{ "id": "number", "sort_order": "number" }] },
+        "responses": { "200": {} }
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/tasks/:taskId/subtasks/:subtaskId",
+        "summary": "Delete a subtask",
+        "responses": { "200": { "schema": { "stats": { "total": "number", "completed": "number" } } } }
+      },
+      {
+        "method": "GET",
+        "path": "/api/tasks/:id/pomodoro",
+        "summary": "Get pomodoro stats and session history for a task",
+        "responses": { "200": { "schema": { "stats": { "sessionCount": "number", "totalMinutes": "number" }, "sessions": "PomodoroSession[]" } } }
+      },
+      {
+        "method": "GET",
+        "path": "/api/tags",
+        "summary": "Get all tags (context + regular)",
+        "responses": { "200": { "schema": { "tags": "Tag[]" } } }
+      },
+      {
+        "method": "GET",
+        "path": "/api/tags/context",
+        "summary": "Get only GTD context tags (@-prefixed)",
+        "responses": { "200": {} }
+      },
+      {
+        "method": "GET",
+        "path": "/api/tags/regular",
+        "summary": "Get only regular (non-context) tags",
+        "responses": { "200": {} }
+      },
+      {
+        "method": "POST",
+        "path": "/api/tags",
+        "summary": "Create a tag (auto-detects context if name starts with @)",
+        "requestBody": { "name": "string (required)", "color": "string? (hex)", "isContext": "boolean?" },
+        "responses": { "201": {}, "400": {}, "409": { "error": "duplicate name" } }
+      },
+      {
+        "method": "PUT",
+        "path": "/api/tags/:id",
+        "summary": "Update a tag name or color",
+        "requestBody": { "name": "string?", "color": "string?" },
+        "responses": { "200": {}, "404": {}, "409": {} }
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/tags/:id",
+        "summary": "Delete a tag (cascades to task_tags)",
+        "responses": { "200": {}, "404": {} }
+      },
+      {
+        "method": "GET",
+        "path": "/api/activity",
+        "summary": "Get paginated activity log with optional entity filters",
+        "parameters": [
+          { "name": "limit", "in": "query", "type": "number?", "default": 50 },
+          { "name": "offset", "in": "query", "type": "number?", "default": 0 },
+          { "name": "entityType", "in": "query", "type": "string?" },
+          { "name": "entityId", "in": "query", "type": "string?" }
+        ],
+        "responses": { "200": { "schema": { "activities": "Activity[]", "total": "number", "hasMore": "boolean" } } }
+      },
+      {
+        "method": "GET",
+        "path": "/api/pomodoro/active",
+        "summary": "Get the currently active pomodoro session (auto-completes expired ones)",
+        "responses": { "200": { "schema": { "session": "PomodoroSession | null" } } }
+      },
+      {
+        "method": "GET",
+        "path": "/api/pomodoro/stats/today",
+        "summary": "Get today's pomodoro statistics",
+        "responses": { "200": { "schema": { "sessionCount": "number", "totalMinutes": "number", "date": "string" } } }
+      },
+      {
+        "method": "GET",
+        "path": "/api/pomodoro/sessions",
+        "summary": "Get recent completed pomodoro sessions",
+        "parameters": [{ "name": "limit", "in": "query", "type": "number?", "default": 20 }],
+        "responses": { "200": { "schema": { "sessions": "PomodoroSession[]" } } }
+      },
+      {
+        "method": "POST",
+        "path": "/api/pomodoro/start",
+        "summary": "Start a new pomodoro session",
+        "requestBody": { "taskId": "number?", "durationMinutes": "number? (default 25)" },
+        "responses": { "201": {}, "404": {}, "409": { "error": "session already active" } }
+      },
+      {
+        "method": "POST",
+        "path": "/api/pomodoro/:id/complete",
+        "summary": "Complete an active pomodoro session",
+        "requestBody": { "notes": "string?" },
+        "responses": { "200": {}, "400": { "error": "not active" }, "404": {} }
+      },
+      {
+        "method": "POST",
+        "path": "/api/pomodoro/:id/cancel",
+        "summary": "Cancel an active pomodoro session",
+        "responses": { "200": {}, "400": {}, "404": {} }
+      },
+      {
+        "method": "PUT",
+        "path": "/api/pomodoro/:id/task",
+        "summary": "Change the task linked to an active pomodoro session",
+        "requestBody": { "taskId": "number?" },
+        "responses": { "200": {}, "400": {}, "404": {} }
+      },
+      {
+        "method": "GET",
+        "path": "/api/task-templates",
+        "summary": "Get all task templates (built-in + user-created)",
+        "responses": { "200": { "schema": { "templates": "TaskTemplate[]" } } }
+      },
+      {
+        "method": "GET",
+        "path": "/api/task-templates/:id",
+        "summary": "Get a single task template by ID",
+        "responses": { "200": {}, "404": {} }
+      },
+      {
+        "method": "POST",
+        "path": "/api/task-templates",
+        "summary": "Create a custom task template",
+        "requestBody": { "name": "string (required)", "description": "string?", "icon": "string?", "title": "string?", "priority": "string?", "quadrant": "string?", "estimatedDuration": "string?", "defaultTags": "number[]?", "comments": "string?" },
+        "responses": { "201": {}, "400": {} }
+      },
+      {
+        "method": "POST",
+        "path": "/api/task-templates/from-task/:taskId",
+        "summary": "Create a template from an existing task",
+        "requestBody": { "name": "string (required)" },
+        "responses": { "201": {}, "400": {}, "404": {} }
+      },
+      {
+        "method": "PUT",
+        "path": "/api/task-templates/:id",
+        "summary": "Update a user-created template (built-in templates are immutable)",
+        "responses": { "200": {}, "403": { "error": "cannot edit built-in" }, "404": {} }
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/task-templates/:id",
+        "summary": "Delete a user-created template (built-in cannot be deleted)",
+        "responses": { "200": {}, "403": {}, "404": {} }
+      },
+      {
+        "method": "GET",
+        "path": "/api/yaml",
+        "summary": "Export all projects and tasks as YAML-formatted text",
+        "responses": { "200": { "schema": { "content": "string (YAML)", "lastModified": "string" } } }
+      }
+    ]
+  },
+
+  "frontend": {
+    "framework": "React 18 (CRA)",
+    "entryPoint": "client/src/index.jsx",
+    "rootComponent": "App",
+    "viewModes": [
+      { "id": "projects", "label": "Projects View", "hotkey": "Alt+1", "description": "Card-based project view with expandable task tables" },
+      { "id": "tasks", "label": "All Tasks", "hotkey": "Alt+2", "description": "Flat table of all tasks across projects with drag-and-drop" },
+      { "id": "priority", "label": "Priority Matrix", "hotkey": "Alt+3", "description": "Eisenhower matrix (DO FIRST / SCHEDULE / DELEGATE / ELIMINATE)" },
+      { "id": "kanban", "label": "Kanban Board", "hotkey": "Alt+4", "description": "Swim lanes by status (PENDING \u2192 INPROGRESS \u2192 COMPLETED)" }
+    ],
+    "components": [
+      {
+        "name": "App",
+        "file": "src/App.jsx",
+        "role": "Root component",
+        "description": "Fetches data from /api/tasks, manages loading/error states, provides theme and undo toast context to children."
+      },
+      {
+        "name": "Dashboard",
+        "file": "src/components/Dashboard.jsx",
+        "role": "Main layout orchestrator",
+        "description": "Contains header, sidebar, stats bar, search/filter bars, and switches between Projects/Tasks/Priority/Kanban views. Manages all CRUD operations, view preferences (persisted to localStorage), and keyboard shortcuts."
+      },
+      {
+        "name": "Sidebar",
+        "file": "src/components/Sidebar.jsx",
+        "role": "Navigation sidebar",
+        "description": "Collapsible project list grouped by status (Active, Completed, Archived). Shows project avatars with color-coded initials. Scrolls-to and highlights projects."
+      },
+      {
+        "name": "ProjectCard",
+        "file": "src/components/ProjectCard.jsx",
+        "role": "Project container card",
+        "description": "Expandable card showing project info, task count stats, and embedded TaskTable. Supports edit, archive, and delete actions."
+      },
+      {
+        "name": "TaskTable",
+        "file": "src/components/TaskTable.jsx",
+        "role": "Task list table",
+        "description": "Sortable, filterable table of tasks within a project. Supports inline editing, drag-and-drop reorder, status/priority badges, progress bars, tag pills, and context menus."
+      },
+      {
+        "name": "AllTasksView",
+        "file": "src/components/AllTasksView.jsx",
+        "role": "Cross-project task list",
+        "description": "Flat view of all tasks across all projects with sorting, filtering, bulk operations, and drag-and-drop reordering."
+      },
+      {
+        "name": "PriorityMatrix",
+        "file": "src/components/PriorityMatrix.jsx",
+        "role": "Eisenhower matrix view",
+        "description": "4-quadrant grid (DO FIRST, SCHEDULE, DELEGATE, ELIMINATE) showing tasks by urgency/importance. Drag between quadrants to reassign."
+      },
+      {
+        "name": "KanbanBoard",
+        "file": "src/components/KanbanBoard.jsx",
+        "role": "Kanban board view",
+        "description": "Swim-lane columns by task status. Drag tasks between columns to change status."
+      },
+      {
+        "name": "SliderPanel",
+        "file": "src/components/SliderPanel.jsx",
+        "role": "Summary slider panel",
+        "description": "Slide-out panel that displays a generated markdown summary (from /api/summary) with task stats, overdue items, and project breakdown."
+      },
+      {
+        "name": "SearchFilterBar",
+        "file": "src/components/SearchFilterBar.jsx",
+        "role": "Search and filter controls",
+        "description": "Text search across task titles/comments with filters for status, priority, due date range, and assigned-to."
+      },
+      {
+        "name": "ContextFilterBar",
+        "file": "src/components/ContextFilterBar.jsx",
+        "role": "GTD context tag filter",
+        "description": "Horizontal bar of GTD context tags (@computer, @calls, etc.) for quick filtering by work context."
+      },
+      {
+        "name": "FormModal",
+        "file": "src/components/FormModal.jsx",
+        "role": "CRUD modals",
+        "description": "Exports ProjectFormModal and ConfirmDialog. Used for creating/editing projects and confirming destructive actions."
+      },
+      {
+        "name": "QuickAddTaskModal",
+        "file": "src/components/QuickAddTaskModal.jsx",
+        "role": "Quick task creation",
+        "description": "Keyboard-shortcut-triggered modal (Alt+N) for rapid task creation with project selection."
+      },
+      {
+        "name": "QuickInboxModal",
+        "file": "src/components/QuickInboxModal.jsx",
+        "role": "Quick inbox capture",
+        "description": "Rapid-fire task capture modal (Alt+I) that adds tasks to the INBOX project with minimal friction."
+      },
+      {
+        "name": "TaskTemplatesModal",
+        "file": "src/components/TaskTemplatesModal.jsx",
+        "role": "Template picker",
+        "description": "Modal for selecting task templates (Alt+T) to create pre-configured tasks with pre-filled fields and checklists."
+      },
+      {
+        "name": "PomodoroTimer",
+        "file": "src/components/PomodoroTimer.jsx",
+        "role": "Pomodoro timer widget",
+        "description": "Compact timer widget with start/pause/stop, task linking, duration presets (25/15/5 min), break management, and today's session stats."
+      },
+      {
+        "name": "InlineTagEditor",
+        "file": "src/components/InlineTagEditor.jsx",
+        "role": "Tag management",
+        "description": "Inline popover for adding/removing tags from tasks. Supports creating new tags on-the-fly with color picker."
+      },
+      {
+        "name": "NaturalDateInput",
+        "file": "src/components/NaturalDateInput.jsx",
+        "role": "Natural language date picker",
+        "description": "Date input that parses natural language ('tomorrow', 'next friday', 'in 3 days', '+5d') into dates."
+      },
+      {
+        "name": "TaskNotesPanel",
+        "file": "src/components/TaskNotesPanel.jsx",
+        "role": "Task notes panel",
+        "description": "Slide-out panel for viewing and managing markdown notes/journal entries for a task."
+      },
+      {
+        "name": "SubtasksChecklist",
+        "file": "src/components/SubtasksChecklist.jsx",
+        "role": "Subtask checklist",
+        "description": "Inline expandable checklist of subtasks with add, toggle, reorder, and delete functionality."
+      },
+      {
+        "name": "ReviewMode",
+        "file": "src/components/ReviewMode.jsx",
+        "role": "GTD review mode",
+        "description": "Guided daily/weekly review wizard (Alt+Shift+R) that walks through overdue tasks, inbox processing, and project health checks."
+      },
+      {
+        "name": "KeyboardShortcutsHelp",
+        "file": "src/components/KeyboardShortcutsHelp.jsx",
+        "role": "Keyboard shortcuts reference",
+        "description": "Modal (Alt+/) showing all available keyboard shortcuts grouped by category."
+      },
+      {
+        "name": "FeatureHelpGuide",
+        "file": "src/components/FeatureHelpGuide.jsx",
+        "role": "Feature tour/guide",
+        "description": "Help guide modal explaining all features with tips and usage instructions."
+      },
+      {
+        "name": "UndoToast",
+        "file": "src/components/UndoToast.jsx",
+        "role": "Undo notification",
+        "description": "Toast notification with undo action for delete/archive operations. Auto-dismisses after timeout."
+      }
+    ],
+    "hooks": [
+      {
+        "name": "useTheme",
+        "file": "src/hooks/useTheme.js",
+        "description": "Dark/light theme toggle. Persists to localStorage, respects system prefers-color-scheme. Sets data-theme attribute on <html>."
+      },
+      {
+        "name": "useHotkeys",
+        "file": "src/hooks/useHotkeys.js",
+        "description": "Global keyboard shortcut system with 20+ bindings across Actions, Navigation, View, and Help categories. Ignores inputs, supports Alt/Ctrl/Meta combos."
+      },
+      {
+        "name": "usePomodoro",
+        "file": "src/hooks/usePomodoro.js",
+        "description": "Pomodoro timer state management. Syncs with backend sessions, persists to localStorage, supports work/short-break/long-break modes, audio chime via Web Audio API."
+      },
+      {
+        "name": "useNotifications",
+        "file": "src/hooks/useNotifications.js",
+        "description": "Browser push notifications for overdue tasks and tasks due today. Schedules 1-hour-before reminders. Tracks notification history per day in localStorage."
+      },
+      {
+        "name": "useFaviconBadge",
+        "file": "src/hooks/useFaviconBadge.js",
+        "description": "Dynamically renders a red badge with count on the favicon and updates document title with (N) prefix for attention-requiring tasks."
+      },
+      {
+        "name": "useSnooze",
+        "file": "src/hooks/useSnooze.js",
+        "description": "Snooze/dismiss attention banners for configurable durations (15min, 30min, 1hr, 3hrs, end-of-day, tomorrow). Persists to localStorage with auto-expiry."
+      },
+      {
+        "name": "useNaturalDate",
+        "file": "src/hooks/useNaturalDate.js",
+        "description": "Natural language date parsing. Supports 'today', 'tomorrow', 'next monday', 'in 3 days', '+5d', 'end of week', 'eom', and day-name shortcuts."
+      }
+    ],
+    "keyboardShortcuts": [
+      { "keys": "Alt+I", "action": "QUICK_INBOX", "category": "Actions" },
+      { "keys": "Alt+N", "action": "NEW_TASK", "category": "Actions" },
+      { "keys": "Alt+P", "action": "NEW_PROJECT", "category": "Actions" },
+      { "keys": "Alt+T", "action": "TASK_TEMPLATES", "category": "Actions" },
+      { "keys": "Alt+R", "action": "REFRESH", "category": "Actions" },
+      { "keys": "Alt+Shift+R", "action": "REVIEW_MODE", "category": "Actions" },
+      { "keys": "Alt+W", "action": "WEEKLY_REVIEW", "category": "Actions" },
+      { "keys": "Alt+D", "action": "DAILY_REVIEW", "category": "Actions" },
+      { "keys": "Ctrl+K", "action": "SEARCH", "category": "Navigation" },
+      { "keys": "Escape", "action": "ESCAPE", "category": "Navigation" },
+      { "keys": "Alt+L", "action": "TOGGLE_THEME", "category": "View" },
+      { "keys": "Alt+1", "action": "VIEW_PROJECTS", "category": "View" },
+      { "keys": "Alt+2", "action": "VIEW_TASKS", "category": "View" },
+      { "keys": "Alt+3", "action": "VIEW_PRIORITY", "category": "View" },
+      { "keys": "Alt+4", "action": "VIEW_KANBAN", "category": "View" },
+      { "keys": "Alt+S", "action": "TOGGLE_SUMMARY", "category": "View" },
+      { "keys": "Alt+H", "action": "TOGGLE_TOOLBAR", "category": "View" },
+      { "keys": "Alt+Shift+S", "action": "TOGGLE_STATS", "category": "View" },
+      { "keys": "Alt+O", "action": "FOCUS_MODE", "category": "View" },
+      { "keys": "Alt+/", "action": "SHOW_HELP", "category": "Help" },
+      { "keys": "Alt+Shift+/", "action": "FEATURE_GUIDE", "category": "Help" }
+    ],
+    "localStorageKeys": [
+      { "key": "taskDashboard_theme", "purpose": "Dark/light theme preference", "type": "string" },
+      { "key": "taskDashboard_defaultView", "purpose": "Last selected view mode", "type": "string" },
+      { "key": "taskDashboard_showArchived", "purpose": "Show/hide archived projects", "type": "boolean" },
+      { "key": "taskDashboard_headerCollapsed", "purpose": "Header toolbar collapsed state", "type": "boolean" },
+      { "key": "taskDashboard_statsCollapsed", "purpose": "Stats panel collapsed state", "type": "boolean" },
+      { "key": "taskDashboard_sidebarCollapsed", "purpose": "Sidebar collapsed state", "type": "boolean" },
+      { "key": "taskDashboard_pomodoroState", "purpose": "Active pomodoro timer state", "type": "object" },
+      { "key": "taskDashboard_snoozedItems", "purpose": "Snoozed attention items with expiry", "type": "object" },
+      { "key": "taskDashboard_notifiedTasks", "purpose": "Tasks already notified today (dedup)", "type": "object" },
+      { "key": "taskDashboard_notificationPermission", "purpose": "Cached notification permission state", "type": "string" }
+    ]
+  },
+
+  "styling": {
+    "approach": "Single CSS file with CSS custom properties (variables)",
+    "file": "client/src/App.css",
+    "themes": {
+      "dark": {
+        "bgPrimary": "#0f172a",
+        "bgSecondary": "#1e293b",
+        "bgCard": "#1e293b",
+        "bgCardHover": "#283548",
+        "bgTableHeader": "#334155",
+        "bgTableRowAlt": "#263244",
+        "textPrimary": "#f1f5f9",
+        "textSecondary": "#94a3b8",
+        "textMuted": "#64748b",
+        "accentPrimary": "#38bdf8",
+        "accentSecondary": "#818cf8",
+        "borderColor": "#334155"
+      },
+      "light": {
+        "bgPrimary": "#f8fafc",
+        "bgSecondary": "#ffffff",
+        "bgCard": "#ffffff",
+        "bgCardHover": "#f1f5f9",
+        "bgTableHeader": "#e2e8f0",
+        "bgTableRowAlt": "#f8fafc",
+        "textPrimary": "#0f172a",
+        "textSecondary": "#475569",
+        "textMuted": "#94a3b8",
+        "accentPrimary": "#0284c7",
+        "accentSecondary": "#6366f1",
+        "borderColor": "#e2e8f0"
+      }
+    },
+    "statusColors": {
+      "PENDING": { "color": "#f59e0b", "bg": "rgba(245, 158, 11, 0.15)" },
+      "INPROGRESS": { "color": "#3b82f6", "bg": "rgba(59, 130, 246, 0.15)" },
+      "COMPLETED": { "color": "#10b981", "bg": "rgba(16, 185, 129, 0.15)" },
+      "CANCELLED": { "color": "#ef4444", "bg": "rgba(239, 68, 68, 0.15)" },
+      "NOT DOING": { "color": "#8b5cf6", "bg": "rgba(139, 92, 246, 0.15)" }
+    },
+    "priorityColors": {
+      "HIGH": { "color": "#dc2626", "bg": "rgba(220, 38, 38, 0.15)" },
+      "MEDIUM": { "color": "#f59e0b", "bg": "rgba(245, 158, 11, 0.15)" },
+      "LOW": { "color": "#64748b", "bg": "rgba(100, 116, 139, 0.15)" }
+    },
+    "typography": {
+      "primaryFont": "'Outfit', -apple-system, BlinkMacSystemFont, sans-serif",
+      "monoFont": "'JetBrains Mono', 'Fira Code', monospace",
+      "fontSource": "Google Fonts",
+      "fontUrl": "https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Outfit:wght@300;400;500;600;700&display=swap",
+      "primaryWeights": [300, 400, 500, 600, 700],
+      "monoWeights": [400, 500]
+    },
+    "layout": {
+      "maxWidth": "1400px",
+      "borderRadius": "12px",
+      "borderRadiusSm": "6px",
+      "lineHeight": 1.6
+    },
+    "themeSelector": "[data-theme='light'] on <html> element",
+    "defaultTheme": "dark (falls back to system preference)"
+  },
+
+  "features": [
+    {
+      "id": "project-management",
+      "name": "Project Management",
+      "description": "CRUD operations for projects with status lifecycle (In Progress \u2192 Completed \u2192 Archived). Cascade delete with tasks."
+    },
+    {
+      "id": "task-management",
+      "name": "Task Management",
+      "description": "Full CRUD with soft-delete/restore, inline editing, drag-and-drop reordering, pinning, cross-project moves, and bulk operations."
+    },
+    {
+      "id": "gtd-contexts",
+      "name": "GTD Context Tags",
+      "description": "10 pre-seeded @-prefixed context tags (@computer, @calls, @email, @errands, @home, @office, @waiting, @read, @focus, @quick) for Getting Things Done methodology. Filter tasks by active context."
+    },
+    {
+      "id": "priority-matrix",
+      "name": "Eisenhower Priority Matrix",
+      "description": "4-quadrant urgency/importance grid: DO FIRST, SCHEDULE, DELEGATE, ELIMINATE. Drag tasks between quadrants."
+    },
+    {
+      "id": "kanban-board",
+      "name": "Kanban Board",
+      "description": "Visual workflow columns by task status with drag-and-drop status transitions."
+    },
+    {
+      "id": "pomodoro-timer",
+      "name": "Pomodoro Timer",
+      "description": "Built-in 25/15/5-minute timer with backend session tracking, task linking, break management, audio chime (Web Audio API), browser notifications on completion, and daily stats."
+    },
+    {
+      "id": "subtasks",
+      "name": "Subtasks / Checklists",
+      "description": "Nested checklist items within tasks. Add, toggle, reorder, bulk create. Completion stats shown in task list."
+    },
+    {
+      "id": "task-notes",
+      "name": "Task Notes / Journal",
+      "description": "Markdown-formatted notes per task with create, edit, delete. Rendered via react-markdown."
+    },
+    {
+      "id": "task-templates",
+      "name": "Task Templates",
+      "description": "8 built-in templates (Code Review, Bug Investigation, etc.) plus user-created templates. Pre-fill title, priority, quadrant, comments/checklists. Create templates from existing tasks."
+    },
+    {
+      "id": "activity-log",
+      "name": "Activity Audit Log",
+      "description": "Full audit trail of all CRUD operations with field-level change tracking (old/new values), entity type filtering, and pagination."
+    },
+    {
+      "id": "smart-summary",
+      "name": "Smart Summary",
+      "description": "Server-generated markdown summary including health status, overdue tasks, upcoming deadlines, potential blockers (keyword detection), subtask progress, and project breakdown."
+    },
+    {
+      "id": "natural-date-input",
+      "name": "Natural Language Dates",
+      "description": "Parse 'tomorrow', 'next friday', 'in 3 days', '+5d', '+2w', 'end of week', 'eom' into date values."
+    },
+    {
+      "id": "keyboard-shortcuts",
+      "name": "Keyboard Shortcuts",
+      "description": "20+ global keyboard shortcuts for all major actions, navigation, and view switching. Platform-aware display (Mac/PC)."
+    },
+    {
+      "id": "browser-notifications",
+      "name": "Browser Notifications",
+      "description": "Push notifications for overdue tasks, tasks due today, and scheduled 1-hour-before reminders. Daily deduplication."
+    },
+    {
+      "id": "favicon-badge",
+      "name": "Favicon Badge",
+      "description": "Dynamic favicon badge with count of attention-requiring tasks (overdue + due today). Updates document title with (N) prefix."
+    },
+    {
+      "id": "snooze",
+      "name": "Snooze Attention Items",
+      "description": "Dismiss overdue/attention banners for configurable durations (15min to end-of-day/tomorrow). Auto-expires."
+    },
+    {
+      "id": "dark-light-theme",
+      "name": "Dark / Light Theme",
+      "description": "Full dual-theme support with CSS custom properties. Persists preference, respects system prefers-color-scheme."
+    },
+    {
+      "id": "review-mode",
+      "name": "GTD Review Mode",
+      "description": "Guided daily and weekly review workflows that walk through inbox processing, overdue triage, and project health."
+    },
+    {
+      "id": "yaml-export",
+      "name": "YAML Export",
+      "description": "Export all projects and tasks as YAML-formatted text via /api/yaml."
+    },
+    {
+      "id": "search-filter",
+      "name": "Search & Filter",
+      "description": "Full-text search across titles and comments. Filters by status, priority, due date range, and assignee."
+    }
+  ]
+}
