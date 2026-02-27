@@ -1,7 +1,7 @@
 const Database = require('better-sqlite3');
 const path = require('path');
 
-const DB_PATH = path.join(__dirname, '..', 'tasks.db');
+const DB_PATH = process.env.DATABASE_PATH || path.join(__dirname, '..', 'tasks.db');
 const db = new Database(DB_PATH);
 
 // Enable foreign keys
@@ -145,6 +145,18 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_pomodoro_task ON pomodoro_sessions(task_id);
   CREATE INDEX IF NOT EXISTS idx_pomodoro_status ON pomodoro_sessions(status);
   CREATE INDEX IF NOT EXISTS idx_pomodoro_started ON pomodoro_sessions(started_at);
+
+  CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    display_name TEXT,
+    role TEXT DEFAULT 'user',
+    created_at TEXT DEFAULT (datetime('now')),
+    last_login TEXT
+  );
+
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username);
 `);
 
 // ============================================================
@@ -1208,6 +1220,34 @@ function getYamlExport() {
 }
 
 // ============================================================
+// Users
+// ============================================================
+
+function createUser(username, passwordHash, displayName) {
+  const stmt = db.prepare(
+    'INSERT INTO users (username, password_hash, display_name) VALUES (?, ?, ?)'
+  );
+  const result = stmt.run(username, passwordHash, displayName || username);
+  return { id: result.lastInsertRowid, username, display_name: displayName || username, role: 'user' };
+}
+
+function getUserByUsername(username) {
+  return db.prepare('SELECT * FROM users WHERE username = ?').get(username);
+}
+
+function getUserById(id) {
+  return db.prepare('SELECT id, username, display_name, role, created_at, last_login FROM users WHERE id = ?').get(id);
+}
+
+function updateLastLogin(id) {
+  db.prepare("UPDATE users SET last_login = datetime('now') WHERE id = ?").run(id);
+}
+
+function getUserCount() {
+  return db.prepare('SELECT COUNT(*) as c FROM users').get().c;
+}
+
+// ============================================================
 // Exports
 // ============================================================
 
@@ -1275,4 +1315,12 @@ module.exports = {
   getStats,
   getSummaryData,
   getYamlExport,
+  // Users
+  createUser,
+  getUserByUsername,
+  getUserById,
+  updateLastLogin,
+  getUserCount,
+  // Lifecycle
+  close: () => db.close(),
 };

@@ -39,8 +39,8 @@ export default function ReviewMode({ type, onClose, projects, onUpdateTask, onRe
     const highPriority = [];
 
     allTasks.forEach(task => {
-      // Skip completed/cancelled
-      if (task.status === 'COMPLETED' || task.status === 'CANCELLED') return;
+      // Skip completed/cancelled/done/not-doing
+      if (['COMPLETED', 'DONE', 'CANCELLED', 'NOT DOING'].includes(task.status)) return;
 
       // In progress tasks
       if (task.status === 'INPROGRESS') {

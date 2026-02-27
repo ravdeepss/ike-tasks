@@ -1,0 +1,11 @@
+node_modules
+.git
+*.db
+*.db-wal
+*.db-shm
+logs
+backups
+.env
+__tests__
+*.test.js
+*.spec.js

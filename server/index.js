@@ -1,20 +1,194 @@
+require('dotenv').config();
+const crypto = require('crypto');
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+const session = require('express-session');
+const bcrypt = require('bcryptjs');
+const morgan = require('morgan');
 const yaml = require('js-yaml');
 const db = require('./database');
+const logger = require('./logger');
+const { requireAuth, csrfCheck } = require('./middleware/auth');
+const { validate, projectSchema, projectUpdateSchema, taskSchema, taskUpdateSchema, tagSchema, noteSchema, subtaskSchema } = require('./validation');
 
 const app = express();
-app.use(cors());
-app.use(express.json());
 
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
+
+// Security headers
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginEmbedderPolicy: false,
+}));
+
+// CORS — restrict to allowed origins
+const allowedOrigins = process.env.CORS_ORIGINS
+  ? process.env.CORS_ORIGINS.split(',').map(s => s.trim())
+  : ['http://localhost:3000'];
+
+const corsOptions = {
+  origin: process.env.NODE_ENV === 'production'
+    ? allowedOrigins
+    : true,
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+};
+app.use(cors(corsOptions));
+
+// Body parsing with size limit
+app.use(express.json({ limit: '1mb' }));
+
+// Rate limiting
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, please try again later' },
+});
+app.use('/api', apiLimiter);
+
+// Request correlation IDs
+app.use((req, res, next) => {
+  req.id = req.headers['x-request-id'] || crypto.randomUUID();
+  res.setHeader('X-Request-ID', req.id);
+  next();
+});
+
+// HTTP request logging
+app.use(morgan(':method :url :status :response-time ms', {
+  stream: { write: (msg) => logger.info(msg.trim()) },
+}));
+
+// Error response helper — hides internals in production
+function sendError(res, err, status = 500) {
+  if (status === 500) logger.error('Server error', { error: err.message, stack: err.stack, requestId: res.req?.id });
+  const message = status === 500 && process.env.NODE_ENV === 'production'
+    ? 'Internal server error'
+    : (err.message || String(err));
+  res.status(status).json({ error: message });
+}
+
+// Session middleware
+if (process.env.NODE_ENV === 'production' && !process.env.SESSION_SECRET) {
+  console.error('FATAL: SESSION_SECRET must be set in production');
+  process.exit(1);
+}
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'dev-secret-change-in-production',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: process.env.NODE_ENV === 'production',
+    httpOnly: true,
+    sameSite: 'lax',
+    maxAge: 24 * 60 * 60 * 1000,
+  },
+}));
+
+// CSRF check on state-changing requests
+app.use('/api', csrfCheck);
 
 // ============================================================
-// Health
+// Health (public)
 // ============================================================
 
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', database: 'connected', timestamp: new Date().toISOString() });
+  try {
+    const userCount = db.getUserCount();
+    const health = {
+      status: 'ok',
+      database: 'connected',
+      timestamp: new Date().toISOString(),
+      needsSetup: userCount === 0,
+    };
+    if (process.env.NODE_ENV !== 'production') {
+      health.uptime = Math.floor(process.uptime());
+      health.memory = Math.round(process.memoryUsage().rss / 1024 / 1024) + 'MB';
+    }
+    res.json(health);
+  } catch (err) {
+    res.status(503).json({ status: 'degraded', database: 'error', timestamp: new Date().toISOString() });
+  }
+});
+
+// ============================================================
+// Auth endpoints (public)
+// ============================================================
+
+app.post('/api/auth/register', (req, res) => {
+  try {
+    const { username, password, displayName } = req.body;
+    if (!username || !password) {
+      return res.status(400).json({ error: 'Username and password are required' });
+    }
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    }
+    const existing = db.getUserByUsername(username);
+    if (existing) {
+      return res.status(409).json({ error: 'Username already taken' });
+    }
+    const hash = bcrypt.hashSync(password, 10);
+    const user = db.createUser(username, hash, displayName);
+    req.session.userId = user.id;
+    req.session.username = user.username;
+    req.session.role = user.role;
+    res.status(201).json({ id: user.id, username: user.username, displayName: user.display_name, role: user.role });
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+app.post('/api/auth/login', (req, res) => {
+  try {
+    const { username, password } = req.body;
+    if (!username || !password) {
+      return res.status(400).json({ error: 'Username and password are required' });
+    }
+    const user = db.getUserByUsername(username);
+    if (!user || !bcrypt.compareSync(password, user.password_hash)) {
+      return res.status(401).json({ error: 'Invalid username or password' });
+    }
+    db.updateLastLogin(user.id);
+    req.session.userId = user.id;
+    req.session.username = user.username;
+    req.session.role = user.role;
+    res.json({ id: user.id, username: user.username, displayName: user.display_name, role: user.role });
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  req.session.destroy((err) => {
+    if (err) return sendError(res, err);
+    res.clearCookie('connect.sid');
+    res.json({ ok: true });
+  });
+});
+
+app.get('/api/auth/me', (req, res) => {
+  if (!req.session || !req.session.userId) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+  const user = db.getUserById(req.session.userId);
+  if (!user) {
+    return res.status(401).json({ error: 'User not found' });
+  }
+  res.json({ id: user.id, username: user.username, displayName: user.display_name, role: user.role });
+});
+
+// ============================================================
+// Auth wall — all routes below require authentication
+// ============================================================
+
+app.use('/api', (req, res, next) => {
+  if (req.path.startsWith('/auth') || req.path === '/health') return next();
+  requireAuth(req, res, next);
 });
 
 // ============================================================
@@ -27,7 +201,7 @@ app.get('/api/tasks', (req, res) => {
     const tags = db.getAllTags();
     res.json({ projects, tags, lastUpdated: new Date().toISOString() });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
@@ -35,7 +209,7 @@ app.get('/api/stats', (req, res) => {
   try {
     res.json(db.getStats());
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
@@ -131,7 +305,7 @@ app.post('/api/summary', (req, res) => {
 
     res.json({ summary: lines.join('\n'), generatedAt });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
@@ -139,9 +313,9 @@ app.post('/api/summary', (req, res) => {
 // Projects
 // ============================================================
 
-app.post('/api/projects', (req, res) => {
+app.post('/api/projects', validate(projectSchema), (req, res) => {
   try {
-    const { code, name, description, status, user } = req.body;
+    const { code, name, description, status } = req.body;
     if (!code || !name) return res.status(400).json({ error: 'code and name are required' });
     db.createProject({ code: code.toUpperCase(), name, description, status });
     db.logActivity({
@@ -149,7 +323,7 @@ app.post('/api/projects', (req, res) => {
       entityId: code.toUpperCase(),
       entityName: name,
       actionType: 'create',
-      user: user || 'System',
+      user: req.user?.username || 'System',
       description: `Created project "${name}"`,
     });
     res.status(201).json({ code: code.toUpperCase(), name });
@@ -157,14 +331,14 @@ app.post('/api/projects', (req, res) => {
     if (err.message && err.message.includes('UNIQUE')) {
       return res.status(409).json({ error: 'Project code already exists' });
     }
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
-app.put('/api/projects/:code', (req, res) => {
+app.put('/api/projects/:code', validate(projectUpdateSchema), (req, res) => {
   try {
     const { code } = req.params;
-    const { user, ...data } = req.body;
+    const data = req.body;
     const result = db.updateProject(code, data);
     if (!result || result.changes === 0) return res.status(404).json({ error: 'Project not found' });
     db.logActivity({
@@ -172,20 +346,20 @@ app.put('/api/projects/:code', (req, res) => {
       entityId: code,
       entityName: data.name || code,
       actionType: 'update',
-      user: user || 'System',
+      user: req.user?.username || 'System',
       changes: data,
       description: `Updated project "${code}"`,
     });
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
 app.put('/api/projects/:code/archive', (req, res) => {
   try {
     const { code } = req.params;
-    const { user } = req.body || {};
+    const user = req.user?.username || 'System';
     const result = db.archiveProject(code);
     if (!result || result.changes === 0) return res.status(404).json({ error: 'Project not found' });
     db.logActivity({
@@ -193,19 +367,19 @@ app.put('/api/projects/:code/archive', (req, res) => {
       entityId: code,
       entityName: code,
       actionType: 'archive',
-      user: user || 'System',
+      user: req.user?.username || 'System',
       description: `Archived project "${code}"`,
     });
     res.json({ canUndo: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
 app.put('/api/projects/:code/restore', (req, res) => {
   try {
     const { code } = req.params;
-    const { status, user } = req.body || {};
+    const { status } = req.body || {};
     const result = db.restoreProject(code, status);
     if (!result || result.changes === 0) return res.status(404).json({ error: 'Project not found' });
     db.logActivity({
@@ -213,19 +387,19 @@ app.put('/api/projects/:code/restore', (req, res) => {
       entityId: code,
       entityName: code,
       actionType: 'restore',
-      user: user || 'System',
+      user: req.user?.username || 'System',
       description: `Restored project "${code}"`,
     });
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
 app.delete('/api/projects/:code', (req, res) => {
   try {
     const { code } = req.params;
-    const user = req.query.user || 'System';
+    const user = req.user?.username || 'System';
     const result = db.deleteProject(code);
     if (!result || result.changes === 0) return res.status(404).json({ error: 'Project not found' });
     db.logActivity({
@@ -238,7 +412,7 @@ app.delete('/api/projects/:code', (req, res) => {
     });
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
@@ -252,18 +426,18 @@ app.get('/api/tasks/deleted', (req, res) => {
     const tasks = db.getDeletedTasks(limit);
     res.json({ tasks, count: tasks.length });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
 app.put('/api/tasks/bulk-move', (req, res) => {
   try {
-    const { taskIds, projectCode, user } = req.body;
+    const { taskIds, projectCode } = req.body;
     if (!taskIds || !projectCode) return res.status(400).json({ error: 'taskIds and projectCode required' });
-    const result = db.bulkMoveTasks(taskIds, projectCode, user || 'System');
+    const result = db.bulkMoveTasks(taskIds, projectCode, req.user?.username || 'System');
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
@@ -274,15 +448,15 @@ app.put('/api/tasks/reorder', (req, res) => {
     db.reorderAllTasks(taskOrders);
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
 // Tasks by project
-app.post('/api/projects/:projectCode/tasks', (req, res) => {
+app.post('/api/projects/:projectCode/tasks', validate(taskSchema), (req, res) => {
   try {
     const { projectCode } = req.params;
-    const { user, ...taskData } = req.body;
+    const taskData = req.body;
     if (!taskData.title) return res.status(400).json({ error: 'title is required' });
     const result = db.createTask(projectCode, taskData);
     if (!result) return res.status(404).json({ error: 'Project not found' });
@@ -291,12 +465,12 @@ app.post('/api/projects/:projectCode/tasks', (req, res) => {
       entityId: String(result.taskId),
       entityName: taskData.title,
       actionType: 'create',
-      user: user || 'System',
+      user: req.user?.username || 'System',
       description: `Created task "${taskData.title}" in project ${projectCode}`,
     });
     res.status(201).json(result);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
@@ -308,20 +482,20 @@ app.put('/api/projects/:projectCode/tasks/reorder', (req, res) => {
     db.reorderTasks(projectCode, taskOrders);
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
 // Tasks by ID
-app.put('/api/tasks/:id', (req, res) => {
+app.put('/api/tasks/:id', validate(taskUpdateSchema), (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const { user, ...data } = req.body;
-    const result = db.updateTask(id, data, user || 'System');
+    const data = req.body;
+    const result = db.updateTask(id, data, req.user?.username || 'System');
     if (!result) return res.status(404).json({ error: 'Task not found' });
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
@@ -329,50 +503,50 @@ app.delete('/api/tasks/:id', (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const permanent = req.query.permanent === 'true';
-    const user = req.query.user || 'System';
+    const user = req.user?.username || 'System';
     const result = db.deleteTask(id, permanent, user);
     if (!result) return res.status(404).json({ error: 'Task not found' });
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
 app.post('/api/tasks/:id/restore', (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const { user } = req.body || {};
-    const result = db.restoreTask(id, user || 'System');
+    const user = req.user?.username || 'System';
+    const result = db.restoreTask(id, user);
     if (!result) return res.status(404).json({ error: 'Task not found' });
     if (result.error) return res.status(400).json(result);
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
 app.put('/api/tasks/:id/pin', (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const { user } = req.body || {};
-    const result = db.togglePin(id, user || 'System');
+    const user = req.user?.username || 'System';
+    const result = db.togglePin(id, user);
     if (!result) return res.status(404).json({ error: 'Task not found' });
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
 app.put('/api/tasks/:id/move', (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const { projectCode, user } = req.body;
+    const { projectCode } = req.body;
     if (!projectCode) return res.status(400).json({ error: 'projectCode required' });
-    const result = db.moveTask(id, projectCode, user || 'System');
+    const result = db.moveTask(id, projectCode, req.user?.username || 'System');
     if (!result) return res.status(404).json({ error: 'Task or project not found' });
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
@@ -384,7 +558,7 @@ app.put('/api/tasks/:id/tags', (req, res) => {
     const tags = db.setTaskTags(id, tagIds);
     res.json({ tags });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
@@ -395,7 +569,7 @@ app.get('/api/tasks/:id/activity', (req, res) => {
     const activities = db.getTaskActivity(id, limit);
     res.json({ activities });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
@@ -409,19 +583,19 @@ app.get('/api/tasks/:id/subtasks', (req, res) => {
     const result = db.getSubtasks(id);
     res.json({ taskId: id, subtasks: result.subtasks, stats: result.stats });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
 app.post('/api/tasks/:id/subtasks/bulk', (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const { subtasks, user } = req.body;
+    const { subtasks } = req.body;
     if (!subtasks) return res.status(400).json({ error: 'subtasks required' });
-    const result = db.bulkCreateSubtasks(id, subtasks, user || 'System');
+    const result = db.bulkCreateSubtasks(id, subtasks, req.user?.username || 'System');
     res.status(201).json({ subtasks: result });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
@@ -433,19 +607,19 @@ app.put('/api/tasks/:id/subtasks/reorder', (req, res) => {
     db.reorderSubtasks(id, subtaskOrders);
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
 app.post('/api/tasks/:id/subtasks', (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const { title, user } = req.body;
+    const { title } = req.body;
     if (!title) return res.status(400).json({ error: 'title is required' });
-    const subtask = db.createSubtask(id, title, user || 'System');
+    const subtask = db.createSubtask(id, title, req.user?.username || 'System');
     res.status(201).json({ subtask });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
@@ -453,12 +627,12 @@ app.put('/api/tasks/:taskId/subtasks/:subtaskId', (req, res) => {
   try {
     const taskId = parseInt(req.params.taskId);
     const subtaskId = parseInt(req.params.subtaskId);
-    const { user, ...data } = req.body;
-    const result = db.updateSubtask(taskId, subtaskId, data, user || 'System');
+    const data = req.body;
+    const result = db.updateSubtask(taskId, subtaskId, data, req.user?.username || 'System');
     if (!result) return res.status(404).json({ error: 'Subtask not found' });
     res.json({ subtask: result });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
@@ -470,7 +644,7 @@ app.post('/api/tasks/:taskId/subtasks/:subtaskId/toggle', (req, res) => {
     if (!result) return res.status(404).json({ error: 'Subtask not found' });
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
@@ -482,7 +656,7 @@ app.delete('/api/tasks/:taskId/subtasks/:subtaskId', (req, res) => {
     if (!result) return res.status(404).json({ error: 'Subtask not found' });
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
@@ -495,19 +669,19 @@ app.get('/api/tasks/:id/notes', (req, res) => {
     const id = parseInt(req.params.id);
     res.json(db.getTaskNotes(id));
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
 app.post('/api/tasks/:id/notes', (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const { content, user } = req.body;
+    const { content } = req.body;
     if (!content) return res.status(400).json({ error: 'content is required' });
-    const note = db.createNote(id, content, user || 'System');
+    const note = db.createNote(id, content, req.user?.username || 'System');
     res.status(201).json({ note });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
@@ -515,13 +689,13 @@ app.put('/api/tasks/:taskId/notes/:noteId', (req, res) => {
   try {
     const taskId = parseInt(req.params.taskId);
     const noteId = parseInt(req.params.noteId);
-    const { content, user } = req.body;
+    const { content } = req.body;
     if (!content) return res.status(400).json({ error: 'content is required' });
-    const note = db.updateNote(taskId, noteId, content, user || 'System');
+    const note = db.updateNote(taskId, noteId, content, req.user?.username || 'System');
     if (!note) return res.status(404).json({ error: 'Note not found' });
     res.json({ note });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
@@ -533,7 +707,7 @@ app.delete('/api/tasks/:taskId/notes/:noteId', (req, res) => {
     if (!result) return res.status(404).json({ error: 'Note not found' });
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
@@ -546,7 +720,7 @@ app.get('/api/pomodoro/active', (req, res) => {
     const session = db.getActiveSession();
     res.json({ session });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
@@ -554,7 +728,7 @@ app.get('/api/pomodoro/stats/today', (req, res) => {
   try {
     res.json(db.getTodayStats());
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
@@ -564,7 +738,7 @@ app.get('/api/pomodoro/sessions', (req, res) => {
     const sessions = db.getRecentSessions(limit);
     res.json({ sessions });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
@@ -575,7 +749,7 @@ app.post('/api/pomodoro/start', (req, res) => {
     if (result.error) return res.status(409).json(result);
     res.status(201).json({ session: result });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
@@ -588,7 +762,7 @@ app.post('/api/pomodoro/:id/complete', (req, res) => {
     if (result.error) return res.status(400).json(result);
     res.json({ session: result });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
@@ -600,7 +774,7 @@ app.post('/api/pomodoro/:id/cancel', (req, res) => {
     if (result.error) return res.status(400).json(result);
     res.json({ session: result });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
@@ -612,7 +786,7 @@ app.put('/api/pomodoro/:id/task', (req, res) => {
     if (!result || result.changes === 0) return res.status(404).json({ error: 'Session not found' });
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
@@ -621,7 +795,7 @@ app.get('/api/tasks/:id/pomodoro', (req, res) => {
     const id = parseInt(req.params.id);
     res.json(db.getTaskPomodoro(id));
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
@@ -633,7 +807,7 @@ app.get('/api/tags/context', (req, res) => {
   try {
     res.json({ tags: db.getContextTags() });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
@@ -641,7 +815,7 @@ app.get('/api/tags/regular', (req, res) => {
   try {
     res.json({ tags: db.getRegularTags() });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
@@ -649,11 +823,11 @@ app.get('/api/tags', (req, res) => {
   try {
     res.json({ tags: db.getAllTags() });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
-app.post('/api/tags', (req, res) => {
+app.post('/api/tags', validate(tagSchema), (req, res) => {
   try {
     const { name, color, isContext } = req.body;
     if (!name) return res.status(400).json({ error: 'name is required' });
@@ -663,7 +837,7 @@ app.post('/api/tags', (req, res) => {
     if (err.message && err.message.includes('UNIQUE')) {
       return res.status(409).json({ error: 'Tag name already exists' });
     }
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
@@ -678,7 +852,7 @@ app.put('/api/tags/:id', (req, res) => {
     if (err.message && err.message.includes('UNIQUE')) {
       return res.status(409).json({ error: 'Tag name already exists' });
     }
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
@@ -689,7 +863,7 @@ app.delete('/api/tags/:id', (req, res) => {
     if (!result || result.changes === 0) return res.status(404).json({ error: 'Tag not found' });
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
@@ -706,7 +880,7 @@ app.post('/api/task-templates/from-task/:taskId', (req, res) => {
     if (!template) return res.status(404).json({ error: 'Task not found' });
     res.status(201).json({ template });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
@@ -714,7 +888,7 @@ app.get('/api/task-templates', (req, res) => {
   try {
     res.json({ templates: db.getTemplates() });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
@@ -725,7 +899,7 @@ app.get('/api/task-templates/:id', (req, res) => {
     if (!template) return res.status(404).json({ error: 'Template not found' });
     res.json({ template });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
@@ -736,7 +910,7 @@ app.post('/api/task-templates', (req, res) => {
     const template = db.createTemplate({ name, ...data });
     res.status(201).json({ template });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
@@ -748,7 +922,7 @@ app.put('/api/task-templates/:id', (req, res) => {
     if (result.error) return res.status(403).json(result);
     res.json({ template: result });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
@@ -760,7 +934,7 @@ app.delete('/api/task-templates/:id', (req, res) => {
     if (result.error) return res.status(403).json(result);
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
@@ -775,7 +949,7 @@ app.get('/api/activity', (req, res) => {
     const { entityType, entityId } = req.query;
     res.json(db.getActivity({ limit, offset, entityType, entityId }));
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
 });
 
@@ -789,14 +963,49 @@ app.get('/api/yaml', (req, res) => {
     const content = yaml.dump(data.projects, { lineWidth: -1, noRefs: true });
     res.json({ content, lastModified: data.lastModified });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, err);
   }
+});
+
+// ============================================================
+// Global error handler
+// ============================================================
+
+app.use((err, req, res, next) => {
+  sendError(res, err);
+});
+
+// ============================================================
+// Production static file serving
+// ============================================================
+const path = require('path');
+const buildPath = path.join(__dirname, '..', 'client', 'build');
+app.use(express.static(buildPath));
+app.get('*', (req, res) => {
+  res.sendFile(path.join(buildPath, 'index.html'));
 });
 
 // ============================================================
 // Start
 // ============================================================
 
-app.listen(PORT, () => {
-  console.log(`Task Dashboard server running on port ${PORT}`);
-});
+if (require.main === module) {
+  const server = app.listen(PORT, () => {
+    logger.info(`Task Dashboard server running on port ${PORT}`);
+  });
+
+  // Graceful shutdown
+  function shutdown(signal) {
+    logger.info(`${signal} received. Shutting down gracefully...`);
+    server.close(() => {
+      db.close();
+      logger.info('Server closed.');
+      process.exit(0);
+    });
+    setTimeout(() => { process.exit(1); }, 10000);
+  }
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
+}
+
+module.exports = app;

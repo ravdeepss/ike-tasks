@@ -5,9 +5,9 @@ import InlineTagEditor from './InlineTagEditor';
 // ============================================================
 // Constants
 // ============================================================
-const STATUS_OPTIONS = ['PENDING', 'INPROGRESS', 'COMPLETED', 'CANCELLED', 'NOT_DOING'];
-const STATUS_LABELS  = { PENDING: 'Pending', INPROGRESS: 'In Progress', COMPLETED: 'Completed', CANCELLED: 'Cancelled', NOT_DOING: 'Not Doing' };
-const STATUS_CSS     = { PENDING: 'status-pending', INPROGRESS: 'status-inprogress', COMPLETED: 'status-completed', CANCELLED: 'status-cancelled', NOT_DOING: 'status-not-doing' };
+const STATUS_OPTIONS = ['PENDING', 'INPROGRESS', 'COMPLETED', 'DONE', 'CANCELLED', 'NOT DOING'];
+const STATUS_LABELS  = { PENDING: 'Pending', INPROGRESS: 'In Progress', COMPLETED: 'Completed', DONE: 'Done', CANCELLED: 'Cancelled', 'NOT DOING': 'Not Doing' };
+const STATUS_CSS     = { PENDING: 'status-pending', INPROGRESS: 'status-inprogress', COMPLETED: 'status-completed', DONE: 'status-done', CANCELLED: 'status-cancelled', 'NOT DOING': 'status-not-doing' };
 
 const PRIORITY_OPTIONS = ['HIGH', 'MEDIUM', 'LOW'];
 const PRIORITY_LABELS  = { HIGH: 'High', MEDIUM: 'Medium', LOW: 'Low' };
@@ -615,7 +615,7 @@ export default function TaskTable({ tasks, projectCode, allTags, allProjects, ha
   const getRowClass = (task) => {
     let cls = 'task-row';
     if (task.pinned) cls += ' task-row-pinned';
-    const done = task.status === 'COMPLETED' || task.status === 'CANCELLED' || task.status === 'NOT_DOING';
+    const done = task.status === 'COMPLETED' || task.status === 'DONE' || task.status === 'CANCELLED' || task.status === 'NOT DOING';
     if (done) cls += ' task-row-done';
     if (!done && task.due_date) {
       const due = new Date(task.due_date + 'T00:00:00'); due.setHours(0,0,0,0);
@@ -741,7 +741,7 @@ export default function TaskTable({ tasks, projectCode, allTags, allProjects, ha
                       <div className="task-title-cell">
                         <span
                           className={`task-title${
-                            task.status === 'COMPLETED' || task.status === 'NOT_DOING'
+                            task.status === 'COMPLETED' || task.status === 'DONE' || task.status === 'NOT DOING'
                               ? ' task-title-done' : ''
                           }`}
                           title={task.title}

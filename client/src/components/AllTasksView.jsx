@@ -5,9 +5,9 @@ import InlineTagEditor from './InlineTagEditor';
 // ============================================================
 // Constants (mirrored from TaskTable)
 // ============================================================
-const STATUS_OPTIONS = ['PENDING', 'INPROGRESS', 'COMPLETED', 'CANCELLED', 'NOT_DOING'];
-const STATUS_LABELS  = { PENDING: 'Pending', INPROGRESS: 'In Progress', COMPLETED: 'Completed', CANCELLED: 'Cancelled', NOT_DOING: 'Not Doing' };
-const STATUS_CSS     = { PENDING: 'status-pending', INPROGRESS: 'status-inprogress', COMPLETED: 'status-completed', CANCELLED: 'status-cancelled', NOT_DOING: 'status-not-doing' };
+const STATUS_OPTIONS = ['PENDING', 'INPROGRESS', 'COMPLETED', 'DONE', 'CANCELLED', 'NOT DOING'];
+const STATUS_LABELS  = { PENDING: 'Pending', INPROGRESS: 'In Progress', COMPLETED: 'Completed', DONE: 'Done', CANCELLED: 'Cancelled', 'NOT DOING': 'Not Doing' };
+const STATUS_CSS     = { PENDING: 'status-pending', INPROGRESS: 'status-inprogress', COMPLETED: 'status-completed', DONE: 'status-done', CANCELLED: 'status-cancelled', 'NOT DOING': 'status-not-doing' };
 
 const PRIORITY_OPTIONS = ['HIGH', 'MEDIUM', 'LOW'];
 const PRIORITY_LABELS  = { HIGH: 'High', MEDIUM: 'Medium', LOW: 'Low' };
@@ -155,7 +155,7 @@ export default function AllTasksView({ projects, allTags, allProjects, handlers,
   const getRowClass = (task) => {
     let cls = 'task-row';
     if (task.pinned) cls += ' task-row-pinned';
-    const done = ['COMPLETED', 'CANCELLED', 'NOT_DOING'].includes(task.status);
+    const done = ['COMPLETED', 'DONE', 'CANCELLED', 'NOT DOING'].includes(task.status);
     if (done) cls += ' task-row-done';
     if (!done && task.due_date) {
       const due = new Date(task.due_date + 'T00:00:00'); due.setHours(0, 0, 0, 0);
@@ -346,7 +346,7 @@ export default function AllTasksView({ projects, allTags, allProjects, handlers,
                   {/* Title + inline tags */}
                   <td className="task-table-td td-title">
                     <div className="task-title-cell">
-                      <span className={`task-title-text${['COMPLETED','CANCELLED','NOT_DOING'].includes(task.status) ? ' task-title-done' : ''}`}>
+                      <span className={`task-title-text${['COMPLETED','DONE','CANCELLED','NOT DOING'].includes(task.status) ? ' task-title-done' : ''}`}>
                         {task.title}
                       </span>
                       {tagList.length > 0 && (

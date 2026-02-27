@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
+import DOMPurify from 'dompurify';
 
 export default function TaskNotesPanel({ taskId, taskTitle, onClose }) {
   const [notes, setNotes] = useState([]);
@@ -179,7 +180,7 @@ export default function TaskNotesPanel({ taskId, taskTitle, onClose }) {
               ) : (
                 <>
                   <div className="note-card-content">
-                    <ReactMarkdown>{note.content}</ReactMarkdown>
+                    <ReactMarkdown>{DOMPurify.sanitize(note.content)}</ReactMarkdown>
                   </div>
                   <div className="note-card-footer">
                     <span className="note-card-time">{formatTime(note.created_at)}</span>

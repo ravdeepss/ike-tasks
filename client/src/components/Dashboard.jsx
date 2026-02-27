@@ -191,7 +191,7 @@ function KeyboardShortcutsModal({ onClose }) {
 // Focus mode overlay (basic — enhanced in Phase 8)
 // ============================================================
 function FocusModeOverlay({ task, onClose }) {
-  const STATUS_LABELS = { PENDING: 'Pending', INPROGRESS: 'In Progress', COMPLETED: 'Completed', CANCELLED: 'Cancelled', NOT_DOING: 'Not Doing' };
+  const STATUS_LABELS = { PENDING: 'Pending', INPROGRESS: 'In Progress', COMPLETED: 'Completed', DONE: 'Done', CANCELLED: 'Cancelled', 'NOT DOING': 'Not Doing' };
   const PRIORITY_LABELS = { HIGH: 'High', MEDIUM: 'Medium', LOW: 'Low' };
 
   useEffect(() => {
@@ -251,7 +251,7 @@ const VIEW_LABELS = {
   kanban:   'Kanban',
 };
 
-export default function Dashboard({ projects, tags, onRefresh, theme, onToggleTheme }) {
+export default function Dashboard({ projects, tags, onRefresh, theme, onToggleTheme, user, onLogout }) {
   const { addToast } = useUndoToasts();
 
   // ---- Persistent UI state ----
@@ -378,7 +378,7 @@ export default function Dashboard({ projects, tags, onRefresh, theme, onToggleTh
     const all = projects.flatMap(p => p.tasks || []);
     const overdue = all.filter(t => {
       if (!t.due_date) return false;
-      if (['COMPLETED','CANCELLED','NOT_DOING'].includes(t.status)) return false;
+      if (['COMPLETED','DONE','CANCELLED','NOT DOING'].includes(t.status)) return false;
       const d = new Date(t.due_date + 'T00:00:00'); d.setHours(0, 0, 0, 0);
       return d < today;
     }).length;
@@ -395,7 +395,7 @@ export default function Dashboard({ projects, tags, onRefresh, theme, onToggleTh
   const overdueTasks = useMemo(() => projects.flatMap(p =>
     (p.tasks || [])
       .filter(t => {
-        if (!t.due_date || ['COMPLETED','CANCELLED','NOT_DOING'].includes(t.status)) return false;
+        if (!t.due_date || ['COMPLETED','DONE','CANCELLED','NOT DOING'].includes(t.status)) return false;
         const d = new Date(t.due_date + 'T00:00:00'); d.setHours(0, 0, 0, 0);
         return d < today;
       })
@@ -405,7 +405,7 @@ export default function Dashboard({ projects, tags, onRefresh, theme, onToggleTh
   const dueTodayTasks = useMemo(() => projects.flatMap(p =>
     (p.tasks || [])
       .filter(t => {
-        if (!t.due_date || ['COMPLETED','CANCELLED','NOT_DOING'].includes(t.status)) return false;
+        if (!t.due_date || ['COMPLETED','DONE','CANCELLED','NOT DOING'].includes(t.status)) return false;
         const d = new Date(t.due_date + 'T00:00:00'); d.setHours(0, 0, 0, 0);
         return d.getTime() === today.getTime();
       })
@@ -681,6 +681,9 @@ export default function Dashboard({ projects, tags, onRefresh, theme, onToggleTh
               <button className="btn btn-ghost btn-sm" onClick={onRefresh}       title="Refresh (Alt+R)">↺</button>
               <button className="btn btn-ghost btn-sm" onClick={onToggleTheme}   title="Toggle theme (Alt+L)">{theme === 'dark' ? '☀' : '☾'}</button>
               <button className="btn btn-ghost btn-sm" onClick={() => setShowKeyboardHelp(true)} title="Keyboard shortcuts (Alt+/)" aria-label="Keyboard shortcuts">?</button>
+              <div className="header-divider" aria-hidden="true" />
+              <span className="header-user-label" title={user?.username}>{user?.displayName || user?.username}</span>
+              <button className="btn btn-ghost btn-sm" onClick={onLogout} title="Logout">Logout</button>
               <button className="btn-icon header-collapse-btn" onClick={() => setHeaderCollapsed(true)} title="Collapse toolbar (Alt+H)" aria-label="Collapse toolbar">▲</button>
             </div>
           </header>
@@ -696,7 +699,10 @@ export default function Dashboard({ projects, tags, onRefresh, theme, onToggleTh
                 ))}
               </div>
             </div>
-            <button className="btn btn-ghost btn-sm" onClick={() => setHeaderCollapsed(false)} title="Show toolbar (Alt+H)">▼ Toolbar</button>
+            <div className="header-right">
+              <button className="btn btn-ghost btn-sm" onClick={onLogout} title="Logout">Logout</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => setHeaderCollapsed(false)} title="Show toolbar (Alt+H)">▼ Toolbar</button>
+            </div>
           </div>
         )}
 

@@ -53,8 +53,9 @@ export default function SearchFilterBar({
           <option value="PENDING">Pending</option>
           <option value="INPROGRESS">In Progress</option>
           <option value="COMPLETED">Completed</option>
+          <option value="DONE">Done</option>
           <option value="CANCELLED">Cancelled</option>
-          <option value="NOT_DOING">Not Doing</option>
+          <option value="NOT DOING">Not Doing</option>
         </select>
 
         <select

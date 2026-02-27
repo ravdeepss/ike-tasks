@@ -13,6 +13,7 @@ const COLUMNS = [
   { key: 'INPROGRESS', label: 'In Progress', color: '#60a5fa', cls: 'col-inprogress' },
   { key: 'COMPLETED',  label: 'Completed',   color: '#4ade80', cls: 'col-completed' },
   { key: 'CANCELLED',  label: 'Cancelled',   color: '#f87171', cls: 'col-cancelled' },
+  { key: 'NOT DOING',  label: 'Not Doing',   color: '#a78bfa', cls: 'col-not-doing' },
 ];
 
 // ============================================================
@@ -37,7 +38,7 @@ function KanbanCard({ task, isDragging, onEdit, onFocus, onDelete, onDragStart, 
   const tagList = task.tags || [];
 
   const today    = new Date(); today.setHours(0, 0, 0, 0);
-  const isDone   = ['COMPLETED', 'CANCELLED', 'NOT_DOING'].includes(task.status);
+  const isDone   = ['COMPLETED', 'DONE', 'CANCELLED', 'NOT DOING'].includes(task.status);
   let isOverdue  = false, isToday = false;
   if (!isDone && task.due_date) {
     const due = new Date(task.due_date + 'T00:00:00'); due.setHours(0, 0, 0, 0);
@@ -144,7 +145,9 @@ export default function KanbanBoard({ projects, allTags, handlers, onFocusTask }
     const map = {};
     for (const col of COLUMNS) map[col.key] = [];
     for (const task of allTasks) {
-      if (map[task.status]) map[task.status].push(task);
+      // Merge DONE into COMPLETED column (semantically equivalent)
+      const col = task.status === 'DONE' ? 'COMPLETED' : task.status;
+      if (map[col]) map[col].push(task);
     }
     for (const col of COLUMNS) {
       map[col.key].sort((a, b) => {

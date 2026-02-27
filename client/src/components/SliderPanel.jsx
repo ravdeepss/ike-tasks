@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
+import DOMPurify from 'dompurify';
 
 /**
  * SliderPanel - Slide-out panel with Summary and Activity tabs.
@@ -203,7 +204,7 @@ function SummaryTab({ summary, loading, error, onRefresh }) {
         </button>
       </div>
       <div className="markdown-content">
-        <ReactMarkdown>{summary.summary || ''}</ReactMarkdown>
+        <ReactMarkdown>{DOMPurify.sanitize(summary.summary || '')}</ReactMarkdown>
       </div>
     </div>
   );
