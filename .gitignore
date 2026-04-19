@@ -3,3 +3,6 @@ tasks.db-wal
 node_modules
 .env
 logs/
+PRODUCT_STRATEGY.md
+PRODUCTIONIZATION_SECURITY_PLAN.md
+BUILD_PLAN.md
