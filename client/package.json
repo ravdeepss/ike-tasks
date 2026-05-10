@@ -5,7 +5,7 @@
   "dependencies": {
     "dompurify": "^3.4.2",
     "react": "^19.2.5",
-    "react-dom": "^19.2.5",
+    "react-dom": "^19.2.6",
     "react-markdown": "^9.1.0",
     "react-scripts": "5.0.1"
   },
